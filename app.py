@@ -9,7 +9,7 @@ from plotly.subplots import make_subplots
 import warnings
 warnings.filterwarnings('ignore')
 
-# CONFIG 
+#  CONFIG 
 st.set_page_config(
     page_title="AI Fraud Detection System",
     page_icon="🔒",
@@ -22,7 +22,7 @@ MODEL_DIR = os.path.join(BASE_DIR, 'models')
 DB_PATH   = os.path.join(BASE_DIR, 'database', 'fraud.db')
 RPT_DIR   = os.path.join(BASE_DIR, 'reports')
 
-#  LOAD RESOURCES 
+#LOAD RESOURCES 
 @st.cache_resource
 def load_model():
     model   = joblib.load(os.path.join(MODEL_DIR, 'fraud_model.pkl'))
@@ -56,7 +56,7 @@ except Exception as e:
     MODEL_LOADED = False
     st.error(f"Model loading failed: {e}")
 
-#  SIDEBAR 
+# SIDEBAR 
 with st.sidebar:
     st.image("https://img.icons8.com/fluency/96/lock.png", width=60)
     st.title("Fraud Detection")
@@ -135,7 +135,7 @@ if "Home" in page:
         st.subheader("Model Evaluation Charts")
         st.image(f'{RPT_DIR}/model_evaluation.png', use_column_width=True)
 
-#  PAGE: FRAUD DETECTION 
+#PAGE: FRAUD DETECTION 
 elif "Detection" in page:
     st.title("🔍 Fraud Detection")
     st.markdown("### Predict whether a transaction is fraudulent")
@@ -214,27 +214,39 @@ elif "Detection" in page:
             st.plotly_chart(fig, use_container_width=True)
 
     with tab2:
-        st.markdown("#### Upload a CSV for Batch Prediction")
-        uploaded = st.file_uploader("Upload CSV (must have V1-V28, Amount, Time columns)", type=['csv'])
+        st.markdown("#### Upload any CSV file to run fraud prediction")
+        st.info("You can upload any CSV file. Missing columns will be filled automatically.")
+        uploaded = st.file_uploader("Upload CSV file", type=['csv'])
         if uploaded:
             df_up = pd.read_csv(uploaded)
-            st.write(f"Uploaded: {df_up.shape[0]:,} rows × {df_up.shape[1]} columns")
-            if all(c in df_up.columns for c in ['Amount','Time'] + [f'V{i}' for i in range(1,29)]):
-                df_up['scaled_amount'] = scaler['amount'].transform(df_up[['Amount']])
-                df_up['scaled_time']   = scaler['time'].transform(df_up[['Time']])
-                X_up = df_up.drop(columns=['Amount','Time'], errors='ignore')
-                X_up = X_up[[f for f in feature_names if f in X_up.columns]]
-                probas = model.predict_proba(X_up)[:,1]
-                preds  = (probas >= 0.5).astype(int)
-                df_up['Fraud_Probability'] = np.round(probas*100, 2)
-                df_up['Prediction']        = preds
-                df_up['Label']             = df_up['Prediction'].map({0:'Legitimate',1:'FRAUD'})
-                st.dataframe(df_up[['Amount','Fraud_Probability','Label']].head(50), use_container_width=True)
-                st.markdown(f"**Fraud detected:** {preds.sum():,} / {len(preds):,}")
-                csv_out = df_up.to_csv(index=False).encode('utf-8')
-                st.download_button("Download Results CSV", csv_out, "fraud_predictions.csv", "text/csv")
+            st.write(f"Uploaded: {df_up.shape[0]:,} rows x {df_up.shape[1]} columns")
+            st.write(f"Columns found: {', '.join(df_up.columns.tolist())}")
+
+            # Build input using matching columns, fill missing ones with 0
+            X_up = pd.DataFrame(0.0, index=range(len(df_up)), columns=feature_names)
+            if 'Amount' in df_up.columns:
+                X_up['scaled_amount'] = scaler['amount'].transform(df_up[['Amount']])
+            if 'Time' in df_up.columns:
+                X_up['scaled_time'] = scaler['time'].transform(df_up[['Time']])
+            for col in feature_names:
+                if col in df_up.columns:
+                    X_up[col] = df_up[col].fillna(0).values
+
+            probas = model.predict_proba(X_up)[:,1]
+            preds  = (probas >= 0.5).astype(int)
+            df_up['Fraud_Probability_%'] = np.round(probas*100, 2)
+            df_up['Prediction']          = preds
+            df_up['Label']               = df_up['Prediction'].map({0:'Legitimate', 1:'FRAUD'})
+
+            st.dataframe(df_up[['Fraud_Probability_%', 'Label']].head(50), use_container_width=True)
+            fraud_count = preds.sum()
+            st.markdown(f"**Fraud detected:** {fraud_count:,} / {len(preds):,} transactions")
+            if fraud_count == 0:
+                st.success("No fraud detected in this file.")
             else:
-                st.error("CSV is missing required columns (V1-V28, Amount, Time).")
+                st.warning(f"{fraud_count} suspicious transactions found. Download results for details.")
+            csv_out = df_up.to_csv(index=False).encode('utf-8')
+            st.download_button("Download Results CSV", csv_out, "fraud_predictions.csv", "text/csv")
 
 #  PAGE: DASHBOARD 
 elif "Dashboard" in page:
@@ -303,7 +315,7 @@ elif "Dashboard" in page:
                          color_discrete_sequence=['#3498db','#e74c3c','#2ecc71','#f39c12'])
         st.plotly_chart(fig_bar, use_container_width=True)
 
-#  PAGE: HISTORY 
+# PAGE: HISTORY 
 elif "History" in page:
     st.title("📋 Prediction History")
     st.markdown("---")
@@ -336,7 +348,7 @@ elif "History" in page:
         csv_export = df_show.to_csv(index=False).encode('utf-8')
         st.download_button("Export History CSV", csv_export, "prediction_history.csv", "text/csv")
 
-#  PAGE: RETRAINING 
+#PAGE: RETRAINING 
 elif "Retraining" in page:
     st.title("🔄 Model Retraining")
     st.markdown("---")
@@ -376,17 +388,28 @@ Replace fraud_model.pkl
 
     st.markdown("---")
     st.subheader("Upload New Training Data")
-    new_data = st.file_uploader("Upload labeled CSV (must include Class column)", type=['csv'])
+    st.info("Upload any CSV file. The system will inspect it and show you what was found.")
+    new_data = st.file_uploader("Upload CSV file", type=['csv'])
     if new_data:
         df_new = pd.read_csv(new_data)
-        st.write(f"Uploaded: {df_new.shape[0]:,} rows")
+        st.write(f"Uploaded: {df_new.shape[0]:,} rows x {df_new.shape[1]} columns")
+        st.write(f"Columns found: {', '.join(df_new.columns.tolist())}")
+
         if 'Class' in df_new.columns:
-            fraud_cnt = df_new['Class'].sum()
-            st.success(f"Valid dataset. Fraud samples: {fraud_cnt:,} ({fraud_cnt/len(df_new)*100:.2f}%)")
+            fraud_cnt = int(df_new['Class'].sum())
+            legit_cnt = len(df_new) - fraud_cnt
+            col1, col2, col3 = st.columns(3)
+            col1.metric("Total Rows", f"{len(df_new):,}")
+            col2.metric("Fraud Samples", f"{fraud_cnt:,}")
+            col3.metric("Legit Samples", f"{legit_cnt:,}")
+            st.success(f"Class column detected. Fraud rate: {fraud_cnt/len(df_new)*100:.3f}%")
             st.button("Start Retraining (Future Feature)", disabled=True)
             st.caption("Full automated retraining pipeline coming in v2.0")
         else:
-            st.error("Dataset must include a 'Class' column (0=Legit, 1=Fraud).")
+            st.warning("No Class column found in this file.")
+            st.write("The system inspected your file and found these columns:")
+            st.write(df_new.columns.tolist())
+            st.info("For retraining, a Class column (0=Legit, 1=Fraud) is needed. For fraud prediction on new data, use the Fraud Detection page instead.")
 
     st.markdown("---")
     st.subheader("Retraining Triggers")
