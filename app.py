@@ -211,14 +211,17 @@ if "Home" in page:
     # Model comparison - reflects current model_metrics.csv
     st.subheader("Model Comparison")
     st.caption("Updates automatically after retraining.")
-    metrics_display = metrics_df[['Model','Accuracy','Precision','Recall','F1','ROC_AUC']].copy()
-    metrics_display.columns = ['Model','Accuracy %','Precision %','Recall %','F1 %','ROC AUC %']
-    st.dataframe(
-        metrics_display.style
-            .highlight_max(axis=0, color='#d4edda')
-            .set_properties(**{'color': 'black'}),
-        use_container_width=True
-    )
+
+    # Build clean formatted table - no extra decimals, no index
+    tbl = metrics_df[['Model','Accuracy','Precision','Recall','F1','ROC_AUC']].copy()
+    tbl['Accuracy']  = tbl['Accuracy'].apply(lambda x: f"{x:.2f}%")
+    tbl['Precision'] = tbl['Precision'].apply(lambda x: f"{x:.2f}%")
+    tbl['Recall']    = tbl['Recall'].apply(lambda x: f"{x:.2f}%")
+    tbl['F1']        = tbl['F1'].apply(lambda x: f"{x:.2f}%")
+    tbl['ROC_AUC']   = tbl['ROC_AUC'].apply(lambda x: f"{x:.2f}%")
+    tbl.columns      = ['Model', 'Accuracy', 'Precision', 'Recall', 'F1', 'ROC AUC']
+    tbl = tbl.reset_index(drop=True)
+    st.table(tbl)
 
     st.markdown("---")
 
