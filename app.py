@@ -9,7 +9,7 @@ from plotly.subplots import make_subplots
 import warnings
 warnings.filterwarnings('ignore')
 
-# CONFIG 
+# CONFIG
 st.set_page_config(
     page_title="AI Fraud Detection System",
     page_icon="🔒",
@@ -23,14 +23,14 @@ DB_PATH    = os.path.join(BASE_DIR, 'database', 'fraud.db')
 RPT_DIR    = os.path.join(BASE_DIR, 'reports')
 ORIG_MODEL = os.path.join(MODEL_DIR, 'fraud_model_original.pkl')
 
-#RISK PROFILE THRESHOLDS 
+# RISK PROFILE THRESHOLDS
 RISK_PROFILES = {
     "🟢  Low Risk":    {"threshold": 0.3, "desc": "Catches more fraud. Expect more false alerts.", "color": "#2ecc71"},
     "🟡  Medium Risk": {"threshold": 0.5, "desc": "Balanced. Recommended for most cases.",          "color": "#f39c12"},
     "🔴  High Risk":   {"threshold": 0.7, "desc": "Only flags very likely fraud. Fewer alerts.",     "color": "#e74c3c"},
 }
 
-# LOAD RESOURCES 
+# LOAD RESOURCES
 @st.cache_resource
 def load_model():
     model   = joblib.load(os.path.join(MODEL_DIR, 'fraud_model.pkl'))
@@ -129,7 +129,7 @@ except Exception as e:
     MODEL_LOADED = False
     st.error(f"Model loading failed: {e}")
 
-# SIDEBAR 
+# SIDEBAR
 with st.sidebar:
     st.image("https://img.icons8.com/fluency/96/lock.png", width=60)
     st.title("Fraud Detection")
@@ -157,24 +157,31 @@ with st.sidebar:
         st.success("Reset complete.")
         st.rerun()
 
-# PAGE: HOME 
+# PAGE: HOME
 if "Home" in page:
     st.title("🔒 AI-Powered Financial Fraud Detection System")
     st.markdown("### Protecting transactions with machine learning")
     st.markdown("---")
 
-    col1, col2, col3, col4 = st.columns(4)
-    preds = get_db_predictions()
+    # Always fetch fresh data  reflects latest uploads and predictions
+    get_db_predictions.clear()
+    preds  = get_db_predictions()
     total  = len(preds)
-    frauds = preds['prediction'].sum()
+    frauds = int(preds['prediction'].sum())
     legits = total - frauds
+    fraud_pct = frauds / max(total, 1) * 100
+    best_row  = metrics_df.loc[metrics_df['F1'].idxmax()]
 
-    col1.metric("Total Predictions", f"{total:,}")
-    col2.metric("Fraud Detected",    f"{frauds:,}", delta=f"{frauds/max(total,1)*100:.1f}%", delta_color="inverse")
-    col3.metric("Legitimate",        f"{legits:,}")
-    col4.metric("Model AUC",         f"{metrics_df.loc[metrics_df['F1'].idxmax(),'ROC_AUC']:.2f}%")
+    col1, col2, col3, col4 = st.columns(4)
+    col1.metric("Total Predictions",  f"{total:,}")
+    col2.metric("Fraud Detected",     f"{frauds:,}",
+                delta=f"{fraud_pct:.1f}%", delta_color="inverse")
+    col3.metric("Legitimate",         f"{legits:,}")
+    col4.metric("Model AUC",          f"{best_row['ROC_AUC']:.2f}%")
 
     st.markdown("---")
+
+    # About section
     col_a, col_b = st.columns(2)
     with col_a:
         st.subheader("What This System Does")
@@ -200,26 +207,171 @@ if "Home" in page:
             st.markdown(f"**{k}**: {v}")
 
     st.markdown("---")
-    st.subheader("Model Comparison")
-    metrics_display = metrics_df[['Model','Accuracy','Precision','Recall','F1','ROC_AUC']].copy()
-    metrics_display.columns = ['Model','Accuracy %','Precision %','Recall %','F1 %','ROC AUC %']
-    st.dataframe(metrics_display.style.highlight_max(axis=0, color='#d4edda'), use_container_width=True)
+
+    # About the author
+    st.subheader("About the Developer")
+    st.markdown("""
+**Issa TOURE** is a data analyst and full-stack developer currently pursuing a Master of Science
+in Computer Science at KIIT University, Bhubaneswar, India. This project was built as part of a
+summer internship program to demonstrate end-to-end machine learning deployment in a real-world
+financial fraud context.
+
+The system covers the full data science lifecycle: raw data ingestion, exploratory analysis,
+feature engineering, model training with class imbalance handling, evaluation, deployment,
+and live monitoring. The application was built entirely in Python using open-source tools
+and is hosted publicly on Streamlit Community Cloud.
+
+**Areas of expertise:** Data Analytics, Python, Machine Learning, Web Development, SQL.
+    """)
 
     st.markdown("---")
-    if os.path.exists(f'{RPT_DIR}/eda_dashboard.png'):
-        st.subheader("Exploratory Data Analysis")
-        st.image(f'{RPT_DIR}/eda_dashboard.png', use_column_width=True)
-    if os.path.exists(f'{RPT_DIR}/model_evaluation.png'):
-        st.subheader("Model Evaluation Charts")
-        st.image(f'{RPT_DIR}/model_evaluation.png', use_column_width=True)
 
-# PAGE: FRAUD DETECTION 
+    # Model comparison  reflects current model_metrics.csv
+    st.subheader("Model Comparison")
+    st.caption("Updates automatically after retraining.")
+    metrics_display = metrics_df[['Model','Accuracy','Precision','Recall','F1','ROC_AUC']].copy()
+    metrics_display.columns = ['Model','Accuracy %','Precision %','Recall %','F1 %','ROC AUC %']
+    st.dataframe(
+        metrics_display.style.highlight_max(axis=0, color='#d4edda'),
+        use_container_width=True
+    )
+
+    st.markdown("---")
+
+    # Live EDA  built from current prediction database
+    st.subheader("Exploratory Data Analysis")
+    st.caption("Charts reflect all predictions currently in the database.")
+
+    if total == 0:
+        st.info("No predictions yet. Make some predictions to see charts.")
+    else:
+        eda1, eda2 = st.columns(2)
+
+        with eda1:
+            # Class distribution
+            fig_class = px.bar(
+                x=['Legitimate', 'Fraud'], y=[legits, frauds],
+                color=['Legitimate', 'Fraud'],
+                color_discrete_map={'Legitimate': '#2ecc71', 'Fraud': '#e74c3c'},
+                title=f"Class Distribution — {total:,} total predictions",
+                labels={'x': 'Class', 'y': 'Count'}
+            )
+            fig_class.update_layout(showlegend=False)
+            st.plotly_chart(fig_class, use_container_width=True)
+
+        with eda2:
+            # Amount distribution by class
+            preds_amt = preds.dropna(subset=['amount'])
+            if len(preds_amt) > 0:
+                fig_amt = px.histogram(
+                    preds_amt, x='amount', color='prediction',
+                    color_discrete_map={0: '#2ecc71', 1: '#e74c3c'},
+                    title="Transaction Amount Distribution",
+                    labels={'amount': 'Amount ($)', 'prediction': 'Class'},
+                    nbins=40, barmode='overlay', opacity=0.7
+                )
+                fig_amt.update_layout(legend_title="0=Legit  1=Fraud")
+                st.plotly_chart(fig_amt, use_container_width=True)
+
+        eda3, eda4 = st.columns(2)
+
+        with eda3:
+            # Fraud probability distribution
+            fig_prob = px.histogram(
+                preds, x='probability', nbins=30,
+                color='prediction',
+                color_discrete_map={0: '#2ecc71', 1: '#e74c3c'},
+                title="Fraud Probability Distribution",
+                labels={'probability': 'Probability', 'prediction': 'Class'},
+                barmode='overlay', opacity=0.7
+            )
+            st.plotly_chart(fig_prob, use_container_width=True)
+
+        with eda4:
+            # Daily trend
+            pm = preds.copy()
+            pm['day'] = pm['timestamp'].dt.to_period('D').astype(str)
+            daily = pm.groupby(['day', 'prediction']).size().reset_index(name='count')
+            daily['label'] = daily['prediction'].map({0: 'Legit', 1: 'Fraud'})
+            fig_trend = px.bar(
+                daily, x='day', y='count', color='label',
+                color_discrete_map={'Legit': '#2ecc71', 'Fraud': '#e74c3c'},
+                title="Daily Prediction Trend", barmode='stack'
+            )
+            fig_trend.update_xaxes(tickangle=45)
+            st.plotly_chart(fig_trend, use_container_width=True)
+
+    st.markdown("---")
+
+    # Live Model Evaluation  ROC and Precision-Recall from DB
+    st.subheader("Model Evaluation")
+    st.caption("Computed from current predictions in the database.")
+
+    if total < 10 or frauds == 0:
+        st.info("Not enough labeled predictions yet to render evaluation charts. Make predictions first.")
+    else:
+        try:
+            from sklearn.metrics import roc_curve, precision_recall_curve, roc_auc_score, average_precision_score
+
+            y_true  = preds['prediction'].values
+            y_score = preds['probability'].values
+
+            ev1, ev2, ev3 = st.columns(3)
+
+            with ev1:
+                # Confusion matrix from 0.5 threshold
+                y_pred = (y_score >= 0.5).astype(int)
+                tp = int(((y_pred == 1) & (y_true == 1)).sum())
+                fp = int(((y_pred == 1) & (y_true == 0)).sum())
+                tn = int(((y_pred == 0) & (y_true == 0)).sum())
+                fn = int(((y_pred == 0) & (y_true == 1)).sum())
+                cm_df = pd.DataFrame(
+                    [[tn, fp], [fn, tp]],
+                    index=['Actual Legit', 'Actual Fraud'],
+                    columns=['Predicted Legit', 'Predicted Fraud']
+                )
+                fig_cm = px.imshow(
+                    cm_df, text_auto=True, color_continuous_scale='Blues',
+                    title="Confusion Matrix (threshold 0.5)"
+                )
+                st.plotly_chart(fig_cm, use_container_width=True)
+
+            with ev2:
+                # ROC Curve
+                fpr, tpr, _ = roc_curve(y_true, y_score)
+                auc_val = roc_auc_score(y_true, y_score)
+                fig_roc = px.line(
+                    x=fpr, y=tpr,
+                    title=f"ROC Curve (AUC = {auc_val:.4f})",
+                    labels={'x': 'False Positive Rate', 'y': 'True Positive Rate'}
+                )
+                fig_roc.add_shape(type='line', x0=0, y0=0, x1=1, y1=1,
+                                   line=dict(dash='dash', color='gray'))
+                fig_roc.update_traces(line_color='#e74c3c', line_width=2)
+                st.plotly_chart(fig_roc, use_container_width=True)
+
+            with ev3:
+                # Precision Recall Curve
+                prec, rec, _ = precision_recall_curve(y_true, y_score)
+                ap = average_precision_score(y_true, y_score)
+                fig_pr = px.line(
+                    x=rec, y=prec,
+                    title=f"Precision-Recall (AP = {ap:.4f})",
+                    labels={'x': 'Recall', 'y': 'Precision'}
+                )
+                fig_pr.update_traces(line_color='#3498db', line_width=2)
+                st.plotly_chart(fig_pr, use_container_width=True)
+
+        except Exception as e:
+            st.warning(f"Could not render evaluation charts: {e}")
+
+# PAGE: FRAUD DETECTION
 elif "Detection" in page:
     st.title("🔍 Fraud Detection")
     st.markdown("### Predict whether a transaction is fraudulent")
     st.markdown("---")
 
-    # RISK PROFILE SELECTOR 
+    # Risk profile selector
     st.subheader("Step 1: Choose Your Risk Profile")
     risk_choice = st.radio(
         "Risk Profile",
@@ -298,7 +450,7 @@ elif "Detection" in page:
             if pred == 1:
                 st.error(f"### ⚠️ FRAUD DETECTED   {risk_label}")
             else:
-                st.success(f"### ✅ LEGITIMATE TRANSACTION    {risk_label}")
+                st.success(f"### ✅ LEGITIMATE TRANSACTION   {risk_label}")
 
             fig = go.Figure(go.Indicator(
                 mode="gauge+number",
@@ -321,7 +473,7 @@ elif "Detection" in page:
 
     with tab2:
         st.markdown("#### Step 2: Upload any CSV file")
-        st.info(f"Using **{risk_choice.split('  ')[1]}** profile threshold {threshold:.0%}. Missing columns filled automatically.")
+        st.info(f"Using **{risk_choice.split('  ')[1]}** profile — threshold {threshold:.0%}. Missing columns filled automatically.")
         uploaded = st.file_uploader("Upload CSV file", type=['csv'])
         if uploaded:
             df_up = pd.read_csv(uploaded)
@@ -341,7 +493,7 @@ elif "Detection" in page:
                 if col in feat_idx:
                     X_arr[:, feat_idx[col]] = df_up[col].fillna(0).values
 
-            # Pass as numpy array - skips sklearn feature name validation
+            # Pass as numpy array skips sklearn feature name validation
             probas = model.predict_proba(X_arr)[:, 1]
             preds  = (probas >= threshold).astype(int)
 
@@ -384,7 +536,7 @@ elif "Detection" in page:
             csv_out = df_up.to_csv(index=False).encode('utf-8')
             st.download_button("Download Results CSV", csv_out, "fraud_predictions.csv", "text/csv")
 
-#  PAGE: DASHBOARD 
+# PAGE: DASHBOARD
 elif "Dashboard" in page:
     st.title("📊 Analytics Dashboard")
     st.markdown("---")
@@ -446,7 +598,7 @@ elif "Dashboard" in page:
                          color_discrete_sequence=['#3498db', '#e74c3c', '#2ecc71', '#f39c12'])
         st.plotly_chart(fig_bar, use_container_width=True)
 
-#PAGE: HISTORY 
+# PAGE: HISTORY
 elif "History" in page:
     st.title("📋 Prediction History")
     st.markdown("---")
@@ -524,7 +676,7 @@ elif "History" in page:
         csv_export = df_show.to_csv(index=False).encode('utf-8')
         st.download_button("Export History CSV", csv_export, "prediction_history.csv", "text/csv")
 
-#  PAGE: RETRAINING 
+# PAGE: RETRAINING
 elif "Retraining" in page:
     st.title("🔄 Model Retraining")
     st.markdown("---")
