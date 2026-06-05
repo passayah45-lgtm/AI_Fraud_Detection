@@ -30,7 +30,7 @@ RISK_PROFILES = {
     "🔴  High Risk":   {"threshold": 0.7, "desc": "Only flags very likely fraud. Fewer alerts.",     "color": "#e74c3c"},
 }
 
-#  LOAD RESOURCES 
+# LOAD RESOURCES 
 @st.cache_resource
 def load_model():
     model   = joblib.load(os.path.join(MODEL_DIR, 'fraud_model.pkl'))
@@ -120,12 +120,12 @@ with st.sidebar:
         st.metric("ROC AUC",  f"{best_row['ROC_AUC']:.2f}%")
         st.metric("Recall",   f"{best_row['Recall']:.2f}%")
     st.markdown("---")
-    st.markdown("#### Reset Data")
-    st.caption("Remove all new predictions and restore the original model and 300 seeded records.")
-    if st.button("🔁  Reset to Original Data", use_container_width=True):
+    st.subheader("Reset Data")
+    st.caption("Restores original model and 300 seeded records.")
+    if st.button("Reset to Original Data", use_container_width=True, type="primary"):
         reset_to_original()
         get_db_predictions.clear()
-        st.success("Reset complete. Original data restored.")
+        st.success("Reset complete.")
         st.rerun()
 
 # PAGE: HOME 
@@ -184,13 +184,13 @@ if "Home" in page:
         st.subheader("Model Evaluation Charts")
         st.image(f'{RPT_DIR}/model_evaluation.png', use_column_width=True)
 
-# PAGE: FRAUD DETECTION 
+#  PAGE: FRAUD DETECTION 
 elif "Detection" in page:
     st.title("🔍 Fraud Detection")
     st.markdown("### Predict whether a transaction is fraudulent")
     st.markdown("---")
 
-    #  RISK PROFILE SELECTOR 
+    # RISK PROFILE SELECTOR 
     st.subheader("Step 1: Choose Your Risk Profile")
     risk_choice = st.radio(
         "Risk Profile",
@@ -266,9 +266,9 @@ elif "Detection" in page:
             col_r3.metric("Risk Level",        risk_label.split(" ",1)[1])
 
             if pred == 1:
-                st.error(f"### ⚠️ FRAUD DETECTED  —  {risk_label}")
+                st.error(f"### ⚠️ FRAUD DETECTED   - {risk_label}")
             else:
-                st.success(f"### ✅ LEGITIMATE TRANSACTION  —  {risk_label}")
+                st.success(f"### ✅ LEGITIMATE TRANSACTION  -  {risk_label}")
 
             fig = go.Figure(go.Indicator(
                 mode="gauge+number",
@@ -291,7 +291,7 @@ elif "Detection" in page:
 
     with tab2:
         st.markdown("#### Step 2: Upload any CSV file")
-        st.info(f"Using **{risk_choice.split('  ')[1]}** profile — threshold {threshold:.0%}. Missing columns filled automatically.")
+        st.info(f"Using **{risk_choice.split('  ')[1]}** profile  threshold {threshold:.0%}. Missing columns filled automatically.")
         uploaded = st.file_uploader("Upload CSV file", type=['csv'])
         if uploaded:
             df_up = pd.read_csv(uploaded)
@@ -411,7 +411,7 @@ elif "Dashboard" in page:
                          color_discrete_sequence=['#3498db', '#e74c3c', '#2ecc71', '#f39c12'])
         st.plotly_chart(fig_bar, use_container_width=True)
 
-# PAGE: HISTORY 
+#  PAGE: HISTORY 
 elif "History" in page:
     st.title("📋 Prediction History")
     st.markdown("---")
@@ -443,7 +443,7 @@ elif "History" in page:
         csv_export = df_show.to_csv(index=False).encode('utf-8')
         st.download_button("Export History CSV", csv_export, "prediction_history.csv", "text/csv")
 
-# PAGE: RETRAINING 
+#  PAGE: RETRAINING 
 elif "Retraining" in page:
     st.title("🔄 Model Retraining")
     st.markdown("---")
@@ -484,7 +484,7 @@ Metrics updated live
 
     st.markdown("---")
     st.subheader("Upload New Training Data")
-    st.info("Upload any CSV file. The system auto-detects the fraud column — no exact column name required.")
+    st.info("Upload any CSV file. The system auto-detects the fraud column. No exact column name required.")
     new_data = st.file_uploader("Upload CSV file", type=['csv'])
 
     if new_data:
@@ -522,7 +522,6 @@ Metrics updated live
                         from sklearn.model_selection import train_test_split
                         from sklearn.metrics import f1_score, roc_auc_score, precision_score, recall_score, accuracy_score
                         from sklearn.preprocessing import StandardScaler
-                        from imblearn.over_sampling import SMOTE
 
                         # Backup original model if not already backed up
                         orig_path = os.path.join(MODEL_DIR, 'fraud_model_original.pkl')
@@ -550,11 +549,15 @@ Metrics updated live
                         X_train, X_test, y_train, y_test = train_test_split(
                             X_scaled, y, test_size=0.2, random_state=42, stratify=y)
 
-                        # SMOTE only if both classes have enough samples
+                        # Manual oversampling (no external dependency)
                         if y_train.sum() >= 5:
-                            k = min(5, y_train.sum() - 1)
-                            sm = SMOTE(random_state=42, k_neighbors=k)
-                            X_train, y_train = sm.fit_resample(X_train, y_train)
+                            minority = X_train[y_train == 1]
+                            min_labels = y_train[y_train == 1]
+                            majority_count = (y_train == 0).sum()
+                            minority_count = (y_train == 1).sum()
+                            repeats = max(1, majority_count // minority_count)
+                            X_train = pd.concat([X_train] + [minority] * repeats, ignore_index=True)
+                            y_train = pd.concat([y_train] + [min_labels] * repeats, ignore_index=True)
 
                         # Train
                         new_model = RandomForestClassifier(
