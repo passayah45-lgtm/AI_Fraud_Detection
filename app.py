@@ -266,9 +266,9 @@ elif "Detection" in page:
             col_r3.metric("Risk Level",        risk_label.split(" ",1)[1])
 
             if pred == 1:
-                st.error(f"### ⚠️ FRAUD DETECTED   - {risk_label}")
+                st.error(f"### ⚠️ FRAUD DETECTED    {risk_label}")
             else:
-                st.success(f"### ✅ LEGITIMATE TRANSACTION  -  {risk_label}")
+                st.success(f"### ✅ LEGITIMATE TRANSACTION    {risk_label}")
 
             fig = go.Figure(go.Indicator(
                 mode="gauge+number",
