@@ -41,7 +41,7 @@ def load_model():
         best_name = f.read().strip()
     return model, scaler, feats, metrics, best_name
 
-@st.cache_data
+@st.cache_data(ttl=0)
 def get_db_predictions():
     conn = sqlite3.connect(DB_PATH)
     df = pd.read_sql_query("SELECT * FROM predictions ORDER BY timestamp DESC", conn)
@@ -163,9 +163,9 @@ if "Home" in page:
     st.markdown("### Protecting transactions with machine learning")
     st.markdown("---")
 
-    # Always fetch fresh data  reflects latest uploads and predictions
+    # Fetch fresh data on every page load
     get_db_predictions.clear()
-    preds  = get_db_predictions()
+    preds = get_db_predictions()
     total  = len(preds)
     frauds = int(preds['prediction'].sum())
     legits = total - frauds
@@ -208,37 +208,21 @@ if "Home" in page:
 
     st.markdown("---")
 
-    # About the author
-    st.subheader("About the Developer")
-    st.markdown("""
-**Issa TOURE** is a data analyst and full-stack developer currently pursuing a Master of Science
-in Computer Science at KIIT University, Bhubaneswar, India. This project was built as part of a
-summer internship program to demonstrate end-to-end machine learning deployment in a real-world
-financial fraud context.
-
-The system covers the full data science lifecycle: raw data ingestion, exploratory analysis,
-feature engineering, model training with class imbalance handling, evaluation, deployment,
-and live monitoring. The application was built entirely in Python using open-source tools
-and is hosted publicly on Streamlit Community Cloud.
-
-**Areas of expertise:** Data Analytics, Python, Machine Learning, Web Development, SQL.
-    """)
-
-    st.markdown("---")
-
-    # Model comparison  reflects current model_metrics.csv
+    # Model comparison - reflects current model_metrics.csv
     st.subheader("Model Comparison")
     st.caption("Updates automatically after retraining.")
     metrics_display = metrics_df[['Model','Accuracy','Precision','Recall','F1','ROC_AUC']].copy()
     metrics_display.columns = ['Model','Accuracy %','Precision %','Recall %','F1 %','ROC AUC %']
     st.dataframe(
-        metrics_display.style.highlight_max(axis=0, color='#d4edda'),
+        metrics_display.style
+            .highlight_max(axis=0, color='#d4edda')
+            .set_properties(**{'color': 'black'}),
         use_container_width=True
     )
 
     st.markdown("---")
 
-    # Live EDA  built from current prediction database
+    # Live EDA - built from current prediction database
     st.subheader("Exploratory Data Analysis")
     st.caption("Charts reflect all predictions currently in the database.")
 
@@ -253,7 +237,7 @@ and is hosted publicly on Streamlit Community Cloud.
                 x=['Legitimate', 'Fraud'], y=[legits, frauds],
                 color=['Legitimate', 'Fraud'],
                 color_discrete_map={'Legitimate': '#2ecc71', 'Fraud': '#e74c3c'},
-                title=f"Class Distribution — {total:,} total predictions",
+                title=f"Class Distribution ({total:,} total predictions)",
                 labels={'x': 'Class', 'y': 'Count'}
             )
             fig_class.update_layout(showlegend=False)
@@ -303,7 +287,7 @@ and is hosted publicly on Streamlit Community Cloud.
 
     st.markdown("---")
 
-    # Live Model Evaluation  ROC and Precision-Recall from DB
+    # Live Model Evaluation - ROC and Precision-Recall from DB
     st.subheader("Model Evaluation")
     st.caption("Computed from current predictions in the database.")
 
@@ -351,7 +335,7 @@ and is hosted publicly on Streamlit Community Cloud.
                 st.plotly_chart(fig_roc, use_container_width=True)
 
             with ev3:
-                # Precision Recall Curve
+                # Precision-Recall Curve
                 prec, rec, _ = precision_recall_curve(y_true, y_score)
                 ap = average_precision_score(y_true, y_score)
                 fig_pr = px.line(
@@ -364,6 +348,24 @@ and is hosted publicly on Streamlit Community Cloud.
 
         except Exception as e:
             st.warning(f"Could not render evaluation charts: {e}")
+
+    st.markdown("---")
+
+    # About the developer - always at the bottom
+    st.subheader("About the Developer")
+    st.markdown("""
+**Issa TOURE** is a data analyst and full-stack developer currently pursuing a Master of Science
+in Computer Science at KIIT University, Bhubaneswar, India. This project was built as part of a
+summer internship program to demonstrate end-to-end machine learning deployment in a real-world
+financial fraud context.
+
+The system covers the full data science lifecycle: raw data ingestion, exploratory analysis,
+feature engineering, model training with class imbalance handling, evaluation, deployment,
+and live monitoring. The application was built entirely in Python using open-source tools
+and is hosted publicly on Streamlit Community Cloud.
+
+**Areas of expertise:** Data Analytics, Python, Machine Learning, Web Development, SQL.
+    """)
 
 # PAGE: FRAUD DETECTION
 elif "Detection" in page:
@@ -448,9 +450,9 @@ elif "Detection" in page:
             col_r3.metric("Risk Level",        risk_label.split(" ",1)[1])
 
             if pred == 1:
-                st.error(f"### ⚠️ FRAUD DETECTED   {risk_label}")
+                st.error(f"### FRAUD DETECTED - {risk_label}")
             else:
-                st.success(f"### ✅ LEGITIMATE TRANSACTION   {risk_label}")
+                st.success(f"### LEGITIMATE TRANSACTION - {risk_label}")
 
             fig = go.Figure(go.Indicator(
                 mode="gauge+number",
@@ -493,7 +495,7 @@ elif "Detection" in page:
                 if col in feat_idx:
                     X_arr[:, feat_idx[col]] = df_up[col].fillna(0).values
 
-            # Pass as numpy array skips sklearn feature name validation
+            # Pass as numpy array - skips sklearn feature name validation
             probas = model.predict_proba(X_arr)[:, 1]
             preds  = (probas >= threshold).astype(int)
 
