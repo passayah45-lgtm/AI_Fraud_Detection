@@ -23,7 +23,7 @@ DB_PATH    = os.path.join(BASE_DIR, 'database', 'fraud.db')
 RPT_DIR    = os.path.join(BASE_DIR, 'reports')
 ORIG_MODEL = os.path.join(MODEL_DIR, 'fraud_model_original.pkl')
 
-# RISK PROFILE THRESHOLDS 
+#RISK PROFILE THRESHOLDS 
 RISK_PROFILES = {
     "🟢  Low Risk":    {"threshold": 0.3, "desc": "Catches more fraud. Expect more false alerts.", "color": "#2ecc71"},
     "🟡  Medium Risk": {"threshold": 0.5, "desc": "Balanced. Recommended for most cases.",          "color": "#f39c12"},
@@ -52,8 +52,21 @@ def get_db_predictions():
 def save_prediction(prediction, probability, amount):
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
-    c.execute('INSERT INTO predictions (prediction, probability, amount) VALUES (?,?,?)',
+    # Add analyst_status column if it does not exist yet
+    try:
+        c.execute("ALTER TABLE predictions ADD COLUMN analyst_status TEXT DEFAULT 'Pending'")
+        conn.commit()
+    except:
+        pass
+    c.execute("INSERT INTO predictions (prediction, probability, amount, analyst_status) VALUES (?,?,?,'Pending')",
               (int(prediction), float(probability), float(amount)))
+    conn.commit()
+    conn.close()
+
+def update_analyst_status(record_id, status):
+    conn = sqlite3.connect(DB_PATH)
+    c = conn.cursor()
+    c.execute("UPDATE predictions SET analyst_status = ? WHERE id = ?", (status, record_id))
     conn.commit()
     conn.close()
 
@@ -64,17 +77,21 @@ def reset_to_original():
     c.execute('DELETE FROM predictions WHERE id > 300')
     conn.commit()
     conn.close()
-    # Restore original model if backup exists
+    # Restore original model files if backup exists
     if os.path.exists(ORIG_MODEL):
         shutil.copy(ORIG_MODEL, os.path.join(MODEL_DIR, 'fraud_model.pkl'))
-        # Restore original metrics
         orig_metrics = pd.read_csv(os.path.join(MODEL_DIR, 'model_metrics_original.csv'))
         orig_metrics.to_csv(os.path.join(MODEL_DIR, 'model_metrics.csv'), index=False)
         with open(os.path.join(MODEL_DIR, 'best_model_name_original.txt')) as f:
             orig_name = f.read().strip()
         with open(os.path.join(MODEL_DIR, 'best_model_name.txt'), 'w') as f:
             f.write(orig_name)
-        load_model.clear()
+    # Clear both cache and session_state so app reloads fresh model
+    load_model.clear()
+    for key in ['model','scaler','feature_names','metrics_df','best_model_name']:
+        if key in st.session_state:
+            del st.session_state[key]
+    st.session_state.force_reload = True
 
 def detect_fraud_column(df):
     """Auto-detect the fraud/label column regardless of its name."""
@@ -94,7 +111,19 @@ def detect_fraud_column(df):
     return None
 
 try:
-    model, scaler, feature_names, metrics_df, best_model_name = load_model()
+    _model, _scaler, _feats, _metrics, _best_name = load_model()
+    if 'model' not in st.session_state or st.session_state.get('force_reload'):
+        st.session_state.model          = _model
+        st.session_state.scaler         = _scaler
+        st.session_state.feature_names  = _feats
+        st.session_state.metrics_df     = _metrics
+        st.session_state.best_model_name= _best_name
+        st.session_state.force_reload   = False
+    model          = st.session_state.model
+    scaler         = st.session_state.scaler
+    feature_names  = st.session_state.feature_names
+    metrics_df     = st.session_state.metrics_df
+    best_model_name= st.session_state.best_model_name
     MODEL_LOADED = True
 except Exception as e:
     MODEL_LOADED = False
@@ -184,7 +213,7 @@ if "Home" in page:
         st.subheader("Model Evaluation Charts")
         st.image(f'{RPT_DIR}/model_evaluation.png', use_column_width=True)
 
-#  PAGE: FRAUD DETECTION 
+# PAGE: FRAUD DETECTION 
 elif "Detection" in page:
     st.title("🔍 Fraud Detection")
     st.markdown("### Predict whether a transaction is fraudulent")
@@ -241,8 +270,9 @@ elif "Detection" in page:
                 if f == 'scaled_amount': input_data[f] = sc_amount
                 elif f == 'scaled_time': input_data[f] = sc_time
                 else:                    input_data[f] = v_vals.get(f, 0.0)
-            input_df = pd.DataFrame([input_data])[feature_names]
-            proba    = model.predict_proba(input_df)[0][1]
+            # Pass as numpy array to bypass sklearn feature name validation
+            input_arr = np.array([[input_data[f] for f in feature_names]])
+            proba     = model.predict_proba(input_arr)[0][1]
             pred     = 1 if proba >= threshold else 0
 
             # Risk badge
@@ -266,7 +296,7 @@ elif "Detection" in page:
             col_r3.metric("Risk Level",        risk_label.split(" ",1)[1])
 
             if pred == 1:
-                st.error(f"### ⚠️ FRAUD DETECTED    {risk_label}")
+                st.error(f"### ⚠️ FRAUD DETECTED   {risk_label}")
             else:
                 st.success(f"### ✅ LEGITIMATE TRANSACTION    {risk_label}")
 
@@ -291,23 +321,28 @@ elif "Detection" in page:
 
     with tab2:
         st.markdown("#### Step 2: Upload any CSV file")
-        st.info(f"Using **{risk_choice.split('  ')[1]}** profile  threshold {threshold:.0%}. Missing columns filled automatically.")
+        st.info(f"Using **{risk_choice.split('  ')[1]}** profile threshold {threshold:.0%}. Missing columns filled automatically.")
         uploaded = st.file_uploader("Upload CSV file", type=['csv'])
         if uploaded:
             df_up = pd.read_csv(uploaded)
             st.write(f"Uploaded: {df_up.shape[0]:,} rows x {df_up.shape[1]} columns")
             st.write(f"Columns found: {', '.join(df_up.columns.tolist())}")
 
-            X_up = pd.DataFrame(0.0, index=range(len(df_up)), columns=feature_names)
+            # Build numpy array matching exact training feature order
+            X_arr = np.zeros((len(df_up), len(feature_names)), dtype=np.float64)
+            feat_idx = {f: i for i, f in enumerate(feature_names)}
             if 'Amount' in df_up.columns:
-                X_up['scaled_amount'] = scaler['amount'].transform(df_up[['Amount']])
+                scaled_amt = scaler['amount'].transform(df_up[['Amount']]).flatten()
+                X_arr[:, feat_idx['scaled_amount']] = scaled_amt
             if 'Time' in df_up.columns:
-                X_up['scaled_time'] = scaler['time'].transform(df_up[['Time']])
-            for col in feature_names:
-                if col in df_up.columns:
-                    X_up[col] = df_up[col].fillna(0).values
+                scaled_time = scaler['time'].transform(df_up[['Time']]).flatten()
+                X_arr[:, feat_idx['scaled_time']] = scaled_time
+            for col in df_up.columns:
+                if col in feat_idx:
+                    X_arr[:, feat_idx[col]] = df_up[col].fillna(0).values
 
-            probas = model.predict_proba(X_up)[:, 1]
+            # Pass as numpy array - skips sklearn feature name validation
+            probas = model.predict_proba(X_arr)[:, 1]
             preds  = (probas >= threshold).astype(int)
 
             # Risk labels
@@ -349,7 +384,7 @@ elif "Detection" in page:
             csv_out = df_up.to_csv(index=False).encode('utf-8')
             st.download_button("Download Results CSV", csv_out, "fraud_predictions.csv", "text/csv")
 
-# PAGE: DASHBOARD 
+#  PAGE: DASHBOARD 
 elif "Dashboard" in page:
     st.title("📊 Analytics Dashboard")
     st.markdown("---")
@@ -411,34 +446,80 @@ elif "Dashboard" in page:
                          color_discrete_sequence=['#3498db', '#e74c3c', '#2ecc71', '#f39c12'])
         st.plotly_chart(fig_bar, use_container_width=True)
 
-#  PAGE: HISTORY 
+#PAGE: HISTORY 
 elif "History" in page:
     st.title("📋 Prediction History")
     st.markdown("---")
 
     preds = get_db_predictions()
+    if 'analyst_status' not in preds.columns:
+        preds['analyst_status'] = 'Pending'
+
     if preds.empty:
         st.warning("No prediction records found.")
     else:
+        # Status summary
+        s1, s2, s3 = st.columns(3)
+        s1.metric("Pending Review",  (preds['analyst_status'] == 'Pending').sum())
+        s2.metric("Confirmed Fraud", (preds['analyst_status'] == 'Confirmed Fraud').sum())
+        s3.metric("False Positives", (preds['analyst_status'] == 'False Positive').sum())
+        st.markdown("---")
+
         col1, col2 = st.columns([1, 3])
         with col1:
-            filter_class = st.selectbox("Filter by class", ["All", "Fraud Only", "Legit Only"])
-            min_prob     = st.slider("Min probability", 0.0, 1.0, 0.0, 0.01)
+            filter_class  = st.selectbox("Filter by class",  ["All", "Fraud Only", "Legit Only"])
+            min_prob      = st.slider("Min probability", 0.0, 1.0, 0.0, 0.01)
+            filter_status = st.selectbox("Filter by status", ["All", "Pending", "Confirmed Fraud", "False Positive"])
 
         df_show = preds.copy()
-        if filter_class == "Fraud Only":  df_show = df_show[df_show['prediction'] == 1]
-        elif filter_class == "Legit Only": df_show = df_show[df_show['prediction'] == 0]
+        if filter_class == "Fraud Only":   df_show = df_show[df_show['prediction'] == 1]
+        elif filter_class == "Legit Only":  df_show = df_show[df_show['prediction'] == 0]
         df_show = df_show[df_show['probability'] >= min_prob]
+        if filter_status != "All":
+            df_show = df_show[df_show['analyst_status'] == filter_status]
 
         df_show['Label']       = df_show['prediction'].map({0: 'Legitimate', 1: 'FRAUD'})
         df_show['Probability'] = (df_show['probability'] * 100).round(2).astype(str) + '%'
         df_show['Amount']      = df_show['amount'].apply(lambda x: f"${x:.2f}" if pd.notnull(x) else 'N/A')
 
-        st.dataframe(
-            df_show[['id', 'Label', 'Probability', 'Amount', 'timestamp']].rename(
-                columns={'id': 'ID', 'timestamp': 'Timestamp'}),
-            use_container_width=True
+        st.info("Change the Status column to mark predictions as Confirmed Fraud or False Positive, then click Save Reviews.")
+
+        edit_df = df_show[['id', 'Label', 'Probability', 'Amount', 'timestamp', 'analyst_status']].rename(
+            columns={'id': 'ID', 'timestamp': 'Timestamp', 'analyst_status': 'Status'})
+
+        updated = st.data_editor(
+            edit_df,
+            column_config={
+                "ID":          st.column_config.Column(disabled=True),
+                "Label":       st.column_config.Column(disabled=True),
+                "Probability": st.column_config.Column(disabled=True),
+                "Amount":      st.column_config.Column(disabled=True),
+                "Timestamp":   st.column_config.Column(disabled=True),
+                "Status": st.column_config.SelectboxColumn(
+                    "Analyst Review",
+                    options=["Pending", "Confirmed Fraud", "False Positive"],
+                    required=True
+                )
+            },
+            use_container_width=True,
+            hide_index=True,
+            key="analyst_review_table"
         )
+
+        if st.button("Save Reviews", type="primary", use_container_width=True):
+            changes = 0
+            for i, row in updated.iterrows():
+                original_status = df_show.iloc[i]['analyst_status'] if i < len(df_show) else 'Pending'
+                if row['Status'] != original_status:
+                    update_analyst_status(int(row['ID']), row['Status'])
+                    changes += 1
+            get_db_predictions.clear()
+            if changes > 0:
+                st.success(f"{changes} review(s) saved successfully.")
+            else:
+                st.info("No changes detected.")
+            st.rerun()
+
         st.markdown(f"Showing **{len(df_show):,}** of **{len(preds):,}** records")
         csv_export = df_show.to_csv(index=False).encode('utf-8')
         st.download_button("Export History CSV", csv_export, "prediction_history.csv", "text/csv")
@@ -522,6 +603,8 @@ Metrics updated live
                         from sklearn.model_selection import train_test_split
                         from sklearn.metrics import f1_score, roc_auc_score, precision_score, recall_score, accuracy_score
                         from sklearn.preprocessing import StandardScaler
+                        from sklearn.pipeline import Pipeline
+                        from sklearn.compose import ColumnTransformer
 
                         # Backup original model if not already backed up
                         orig_path = os.path.join(MODEL_DIR, 'fraud_model_original.pkl')
@@ -532,7 +615,7 @@ Metrics updated live
                             shutil.copy(os.path.join(MODEL_DIR, 'best_model_name.txt'),
                                         os.path.join(MODEL_DIR, 'best_model_name_original.txt'))
 
-                        # Feature engineering
+                        # Select numeric features only
                         num_cols = df_new.select_dtypes(include=[np.number]).columns.tolist()
                         num_cols = [c for c in num_cols if c != 'Class']
                         if len(num_cols) == 0:
@@ -542,33 +625,44 @@ Metrics updated live
                         X = df_new[num_cols].fillna(0)
                         y = df_new['Class']
 
-                        # Scale if Amount/Time present
-                        new_scaler = StandardScaler()
-                        X_scaled   = pd.DataFrame(new_scaler.fit_transform(X), columns=X.columns)
-
                         X_train, X_test, y_train, y_test = train_test_split(
-                            X_scaled, y, test_size=0.2, random_state=42, stratify=y)
+                            X, y, test_size=0.2, random_state=42, stratify=y)
 
                         # Manual oversampling (no external dependency)
                         if y_train.sum() >= 5:
-                            minority = X_train[y_train == 1]
+                            minority   = X_train[y_train == 1]
                             min_labels = y_train[y_train == 1]
-                            majority_count = (y_train == 0).sum()
-                            minority_count = (y_train == 1).sum()
-                            repeats = max(1, majority_count // minority_count)
+                            repeats    = max(1, (y_train == 0).sum() // (y_train == 1).sum())
                             X_train = pd.concat([X_train] + [minority] * repeats, ignore_index=True)
                             y_train = pd.concat([y_train] + [min_labels] * repeats, ignore_index=True)
 
-                        # Train
-                        new_model = RandomForestClassifier(
-                            n_estimators=100, max_depth=15, random_state=42, n_jobs=-1)
-                        new_model.fit(X_train, y_train)
+                        # Build Pipeline: scaler + classifier in one object
+                        # This means the saved model handles its own preprocessing
+                        scale_cols = [c for c in X_train.columns if c.lower() in ['amount', 'time']]
+                        if scale_cols:
+                            transformer = ColumnTransformer(
+                                transformers=[('scaler', StandardScaler(), scale_cols)],
+                                remainder='passthrough'
+                            )
+                            new_pipeline = Pipeline([
+                                ('preprocessing', transformer),
+                                ('classifier', RandomForestClassifier(
+                                    n_estimators=100, max_depth=15, random_state=42, n_jobs=-1))
+                            ])
+                        else:
+                            new_pipeline = Pipeline([
+                                ('preprocessing', StandardScaler()),
+                                ('classifier', RandomForestClassifier(
+                                    n_estimators=100, max_depth=15, random_state=42, n_jobs=-1))
+                            ])
+
+                        new_pipeline.fit(X_train, y_train)
 
                         # Evaluate
-                        yp    = new_model.predict(X_test)
-                        yprob = new_model.predict_proba(X_test)[:, 1]
+                        yp    = new_pipeline.predict(X_test)
+                        yprob = new_pipeline.predict_proba(X_test)[:, 1]
                         new_metrics = {
-                            'Model':     'Random Forest (Retrained)',
+                            'Model':     'Random Forest + Pipeline (Retrained)',
                             'Accuracy':  round(accuracy_score(y_test, yp) * 100, 2),
                             'Precision': round(precision_score(y_test, yp, zero_division=0) * 100, 2),
                             'Recall':    round(recall_score(y_test, yp, zero_division=0) * 100, 2),
@@ -576,25 +670,27 @@ Metrics updated live
                             'ROC_AUC':   round(roc_auc_score(y_test, yprob) * 100, 2),
                         }
 
-                        # Save new model and metrics
-                        joblib.dump(new_model, os.path.join(MODEL_DIR, 'fraud_model.pkl'))
+                        # Save pipeline and metadata
+                        joblib.dump(new_pipeline, os.path.join(MODEL_DIR, 'fraud_model.pkl'))
                         joblib.dump(X.columns.tolist(), os.path.join(MODEL_DIR, 'feature_names.pkl'))
-                        new_metrics_df = pd.DataFrame([new_metrics])
-                        new_metrics_df.to_csv(os.path.join(MODEL_DIR, 'model_metrics.csv'), index=False)
+                        pd.DataFrame([new_metrics]).to_csv(os.path.join(MODEL_DIR, 'model_metrics.csv'), index=False)
                         with open(os.path.join(MODEL_DIR, 'best_model_name.txt'), 'w') as f:
-                            f.write('Random Forest (Retrained)')
+                            f.write('Random Forest + Pipeline (Retrained)')
 
                         load_model.clear()
-                        model, scaler, feature_names, metrics_df, best_model_name = load_model()
+                        for key in ['model','scaler','feature_names','metrics_df','best_model_name']:
+                            if key in st.session_state:
+                                del st.session_state[key]
+                        st.session_state.force_reload = True
 
-                        st.success("Retraining complete! Model updated successfully.")
+                        st.success("Retraining complete. Pipeline model saved and active.")
                         st.markdown("### New Model Performance")
                         r1, r2, r3, r4, r5 = st.columns(5)
-                        r1.metric("F1 Score",   f"{new_metrics['F1']:.2f}%")
-                        r2.metric("ROC AUC",    f"{new_metrics['ROC_AUC']:.2f}%")
-                        r3.metric("Recall",     f"{new_metrics['Recall']:.2f}%")
-                        r4.metric("Precision",  f"{new_metrics['Precision']:.2f}%")
-                        r5.metric("Accuracy",   f"{new_metrics['Accuracy']:.2f}%")
+                        r1.metric("F1 Score",  f"{new_metrics['F1']:.2f}%")
+                        r2.metric("ROC AUC",   f"{new_metrics['ROC_AUC']:.2f}%")
+                        r3.metric("Recall",    f"{new_metrics['Recall']:.2f}%")
+                        r4.metric("Precision", f"{new_metrics['Precision']:.2f}%")
+                        r5.metric("Accuracy",  f"{new_metrics['Accuracy']:.2f}%")
                         st.info("Use the Reset button in the sidebar to restore the original model anytime.")
 
                     except Exception as e:
