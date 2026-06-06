@@ -208,24 +208,7 @@ if "Home" in page:
 
     st.markdown("---")
 
-    # About the author
-    st.subheader("About the Developer")
-    st.markdown("""
-**Mister T** is a data analyst and full-stack developer currently pursuing a Master of Science
-in Data Analysis at KIIT University, Bhubaneswar, India. This project was built as part of a
-summer internship program to demonstrate end-to-end machine learning deployment in a real-world
-financial fraud context.
-
-The system covers the full data science lifecycle: raw data ingestion, exploratory analysis,
-feature engineering, model training with class imbalance handling, evaluation, deployment,
-and live monitoring. The application was built entirely in Python using open-source tools
-and is hosted publicly on Streamlit Community Cloud.
-
-**Areas of expertise:** Data Analytics, Python, Machine Learning, Web Development, SQL.
-    """)
-
-    st.markdown("---")
-
+    
     # Model comparison - reflects current model_metrics.csv
     st.subheader("Model Comparison")
     st.caption("Updates automatically after retraining.")
