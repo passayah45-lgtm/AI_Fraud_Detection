@@ -319,7 +319,7 @@ if "Home" in page:
     # App Assistant chatbot
     # Voice fix: use window.location (not window.parent) + query_params to pass transcript
     st.subheader("App Assistant")
-    st.caption("Ask anything in any language - English, French, Arabic, Spanish and more.")
+    st.caption("Ask anything in any language: English, French, Arabic, Spanish and more.")
 
     SYSTEM_PROMPT = (
         "You are a multilingual assistant for an AI-Powered Financial Fraud Detection System "
@@ -539,9 +539,9 @@ elif "Fraud Detection" in page:
             col_r3.metric("Risk Level",        risk_label)
 
             if pred == 1:
-                st.error(f"FRAUD DETECTED - {risk_label}")
+                st.error(f"FRAUD DETECTED  {risk_label}")
             else:
-                st.success(f"LEGITIMATE TRANSACTION - {risk_label}")
+                st.success(f"LEGITIMATE TRANSACTION  {risk_label}")
 
             fig = go.Figure(go.Indicator(
                 mode="gauge+number",
