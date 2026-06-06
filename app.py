@@ -39,7 +39,7 @@ def load_model():
         best_name = f.read().strip()
     return model, scaler, feats, metrics, best_name
 
-# ttl=0 forces fresh read every time fixes KPI stale data
+# ttl=0 forces fresh read every time - fixes KPI stale data
 @st.cache_data(ttl=0)
 def get_db_predictions():
     conn = sqlite3.connect(DB_PATH)
@@ -198,7 +198,6 @@ if "Home" in page:
 
     st.markdown("---")
 
-    # Model comparison clean st.table with formatted values
     st.subheader("Model Comparison")
     st.caption("Updates automatically after retraining.")
     tbl = metrics_df[['Model','Accuracy','Precision','Recall','F1','ROC_AUC']].copy()
@@ -317,9 +316,10 @@ if "Home" in page:
 
     st.markdown("---")
 
-    # Chatbot voice fix: use query_params to pass transcript between browser and server
+    # App Assistant chatbot
+    # Voice fix: use window.location (not window.parent) + query_params to pass transcript
     st.subheader("App Assistant")
-    st.caption("Ask anything in any language: English, French, Arabic, Spanish and more.")
+    st.caption("Ask anything in any language - English, French, Arabic, Spanish and more.")
 
     SYSTEM_PROMPT = (
         "You are a multilingual assistant for an AI-Powered Financial Fraud Detection System "
@@ -329,7 +329,7 @@ if "Home" in page:
         "APP PAGES:\n"
         "- Home: live KPIs, system description, tech stack, model comparison, EDA charts, evaluation charts, chatbot, about developer.\n"
         "- Fraud Detection: choose Risk Profile (Low/Medium/High), enter transaction manually or upload CSV.\n"
-        " Dashboard: live Plotly charts  distribution, daily trends, amount vs probability.\n"
+        "- Dashboard: live Plotly charts - distribution, daily trends, amount vs probability.\n"
         "- History: editable table, mark records as Pending / Confirmed Fraud / False Positive. Export CSV.\n"
         "- Retraining: upload any CSV, auto-detects fraud column, retrains Random Forest, updates metrics.\n\n"
         "MODEL: Random Forest, 284,807 transactions, F1=68.78%, AUC=97.95%, Recall=80%, Precision=60.32%.\n"
@@ -343,17 +343,24 @@ if "Home" in page:
     if "voice_input" not in st.session_state:
         st.session_state.voice_input = ""
 
-    # Check query params for voice transcript passed from JS
-    params = st.query_params
-    if "voice" in params and params["voice"]:
-        voice_from_url = params["voice"]
-        if voice_from_url != st.session_state.voice_input:
-            st.session_state.voice_input = voice_from_url
+    # Read voice transcript from URL query params
+    # JS sets ?voice=transcript then page reloads, Streamlit reads it here
+    try:
+        params = st.query_params
+        if "voice" in params:
+            voice_val = params["voice"]
+            if isinstance(voice_val, list):
+                voice_val = voice_val[0]
+            if voice_val and voice_val.strip() and voice_val != st.session_state.voice_input:
+                st.session_state.voice_input = voice_val.strip()
             st.query_params.clear()
+    except Exception:
+        pass
 
     import streamlit.components.v1 as components
 
-    # Voice button  on result it reloads page with ?voice=transcript
+    # Voice button - on recognition result, reload app URL with ?voice=transcript
+    # Uses window.location (not window.parent) to work correctly on Streamlit Cloud
     voice_html = (
         '<div style="margin-bottom:8px;display:flex;align-items:center;gap:12px;">'
         '<button id="micBtn" onclick="startVoice()" style="'
@@ -379,11 +386,12 @@ if "Home" in page:
         'rec.onresult=function(e){'
         'var t=encodeURIComponent(e.results[0][0].transcript);'
         'btn.textContent="Speak";btn.style.background="#e74c3c";'
-        'st.textContent="Sending...";st.style.color="#3498db";'
-        'window.parent.location.href=window.parent.location.pathname+"?voice="+t;};'
+        'st.textContent="Heard. Sending to assistant...";st.style.color="#2ecc71";'
+        'var base=window.location.href.split("?")[0];'
+        'window.location.replace(base+"?voice="+t);};'
         'rec.onerror=function(e){'
         'btn.textContent="Speak";btn.style.background="#e74c3c";'
-        'st.textContent="Error: "+e.error;st.style.color="#e74c3c";};'
+        'st.textContent="Error: "+e.error+". Try again.";st.style.color="#e74c3c";};'
         'rec.onend=function(){'
         'if(btn.textContent==="Listening..."){'
         'btn.textContent="Speak";btn.style.background="#e74c3c";}};}'
@@ -391,19 +399,15 @@ if "Home" in page:
     )
     components.html(voice_html, height=55)
 
-    # Show voice input in chat input box area
     if st.session_state.voice_input:
         st.info(f"Voice captured: {st.session_state.voice_input}")
 
-    # Display chat history
     for msg in st.session_state.chat_history:
         with st.chat_message(msg["role"]):
             st.markdown(msg["content"])
 
-    # Text input
     user_input = st.chat_input("Ask me anything in any language...")
 
-    # Voice input takes priority if present
     final_input = None
     if st.session_state.voice_input:
         final_input = st.session_state.voice_input
@@ -442,7 +446,6 @@ if "Home" in page:
 
     st.markdown("---")
 
-    # About the developer - very bottom
     st.subheader("About the Developer")
     st.markdown(
         "**Issa TOURE** is a data analyst and full stack developer currently pursuing a Master of Science "
@@ -536,9 +539,9 @@ elif "Fraud Detection" in page:
             col_r3.metric("Risk Level",        risk_label)
 
             if pred == 1:
-                st.error(f"FRAUD DETECTED  {risk_label}")
+                st.error(f"FRAUD DETECTED - {risk_label}")
             else:
-                st.success(f"LEGITIMATE TRANSACTION  {risk_label}")
+                st.success(f"LEGITIMATE TRANSACTION - {risk_label}")
 
             fig = go.Figure(go.Indicator(
                 mode="gauge+number",
@@ -561,7 +564,7 @@ elif "Fraud Detection" in page:
 
     with tab2:
         st.markdown("#### Step 2: Upload any CSV file")
-        st.info(f"Using **{risk_choice}** profile threshold {threshold:.0%}. Missing columns filled automatically.")
+        st.info(f"Using **{risk_choice}** profile - threshold {threshold:.0%}. Missing columns filled automatically.")
         uploaded = st.file_uploader("Upload CSV file", type=['csv'])
         if uploaded:
             df_up = pd.read_csv(uploaded)
