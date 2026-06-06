@@ -52,7 +52,6 @@ def get_db_predictions():
 def save_prediction(prediction, probability, amount):
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
-    # Add analyst_status column if it does not exist yet
     try:
         c.execute("ALTER TABLE predictions ADD COLUMN analyst_status TEXT DEFAULT 'Pending'")
         conn.commit()
@@ -71,13 +70,11 @@ def update_analyst_status(record_id, status):
     conn.close()
 
 def reset_to_original():
-    # Reset database to first 300 seeded records
     conn = sqlite3.connect(DB_PATH)
     c = conn.cursor()
     c.execute('DELETE FROM predictions WHERE id > 300')
     conn.commit()
     conn.close()
-    # Restore original model files if backup exists
     if os.path.exists(ORIG_MODEL):
         shutil.copy(ORIG_MODEL, os.path.join(MODEL_DIR, 'fraud_model.pkl'))
         orig_metrics = pd.read_csv(os.path.join(MODEL_DIR, 'model_metrics_original.csv'))
@@ -86,7 +83,6 @@ def reset_to_original():
             orig_name = f.read().strip()
         with open(os.path.join(MODEL_DIR, 'best_model_name.txt'), 'w') as f:
             f.write(orig_name)
-    # Clear both cache and session_state so app reloads fresh model
     load_model.clear()
     for key in ['model','scaler','feature_names','metrics_df','best_model_name']:
         if key in st.session_state:
@@ -94,13 +90,11 @@ def reset_to_original():
     st.session_state.force_reload = True
 
 def detect_fraud_column(df):
-    """Auto-detect the fraud/label column regardless of its name."""
     candidates = ['Class', 'class', 'is_fraud', 'fraud', 'Fraud', 'label',
                   'Label', 'target', 'Target', 'isFraud', 'is_Fraud']
     for c in candidates:
         if c in df.columns:
             return c
-    # Try any binary column with 0/1 values
     for c in df.columns:
         try:
             unique_vals = df[c].dropna().unique()
@@ -113,17 +107,17 @@ def detect_fraud_column(df):
 try:
     _model, _scaler, _feats, _metrics, _best_name = load_model()
     if 'model' not in st.session_state or st.session_state.get('force_reload'):
-        st.session_state.model          = _model
-        st.session_state.scaler         = _scaler
-        st.session_state.feature_names  = _feats
-        st.session_state.metrics_df     = _metrics
-        st.session_state.best_model_name= _best_name
-        st.session_state.force_reload   = False
-    model          = st.session_state.model
-    scaler         = st.session_state.scaler
-    feature_names  = st.session_state.feature_names
-    metrics_df     = st.session_state.metrics_df
-    best_model_name= st.session_state.best_model_name
+        st.session_state.model           = _model
+        st.session_state.scaler          = _scaler
+        st.session_state.feature_names   = _feats
+        st.session_state.metrics_df      = _metrics
+        st.session_state.best_model_name = _best_name
+        st.session_state.force_reload    = False
+    model           = st.session_state.model
+    scaler          = st.session_state.scaler
+    feature_names   = st.session_state.feature_names
+    metrics_df      = st.session_state.metrics_df
+    best_model_name = st.session_state.best_model_name
     MODEL_LOADED = True
 except Exception as e:
     MODEL_LOADED = False
@@ -163,25 +157,22 @@ if "Home" in page:
     st.markdown("### Protecting transactions with machine learning")
     st.markdown("---")
 
-    # Fetch fresh data on every page load
     get_db_predictions.clear()
-    preds = get_db_predictions()
-    total  = len(preds)
-    frauds = int(preds['prediction'].sum())
-    legits = total - frauds
+    preds     = get_db_predictions()
+    total     = len(preds)
+    frauds    = int(preds['prediction'].sum())
+    legits    = total - frauds
     fraud_pct = frauds / max(total, 1) * 100
     best_row  = metrics_df.loc[metrics_df['F1'].idxmax()]
 
     col1, col2, col3, col4 = st.columns(4)
-    col1.metric("Total Predictions",  f"{total:,}")
-    col2.metric("Fraud Detected",     f"{frauds:,}",
-                delta=f"{fraud_pct:.1f}%", delta_color="inverse")
-    col3.metric("Legitimate",         f"{legits:,}")
-    col4.metric("Model AUC",          f"{best_row['ROC_AUC']:.2f}%")
+    col1.metric("Total Predictions", f"{total:,}")
+    col2.metric("Fraud Detected",    f"{frauds:,}", delta=f"{fraud_pct:.1f}%", delta_color="inverse")
+    col3.metric("Legitimate",        f"{legits:,}")
+    col4.metric("Model AUC",         f"{best_row['ROC_AUC']:.2f}%")
 
     st.markdown("---")
 
-    # About section
     col_a, col_b = st.columns(2)
     with col_a:
         st.subheader("What This System Does")
@@ -208,11 +199,8 @@ if "Home" in page:
 
     st.markdown("---")
 
-    # Model comparison - reflects current model_metrics.csv
     st.subheader("Model Comparison")
     st.caption("Updates automatically after retraining.")
-
-    # Build clean formatted table - no extra decimals, no index
     tbl = metrics_df[['Model','Accuracy','Precision','Recall','F1','ROC_AUC']].copy()
     tbl['Accuracy']  = tbl['Accuracy'].apply(lambda x: f"{x:.2f}%")
     tbl['Precision'] = tbl['Precision'].apply(lambda x: f"{x:.2f}%")
@@ -225,7 +213,6 @@ if "Home" in page:
 
     st.markdown("---")
 
-    # Live EDA - built from current prediction database
     st.subheader("Exploratory Data Analysis")
     st.caption("Charts reflect all predictions currently in the database.")
 
@@ -233,9 +220,7 @@ if "Home" in page:
         st.info("No predictions yet. Make some predictions to see charts.")
     else:
         eda1, eda2 = st.columns(2)
-
         with eda1:
-            # Class distribution
             fig_class = px.bar(
                 x=['Legitimate', 'Fraud'], y=[legits, frauds],
                 color=['Legitimate', 'Fraud'],
@@ -245,9 +230,7 @@ if "Home" in page:
             )
             fig_class.update_layout(showlegend=False)
             st.plotly_chart(fig_class, use_container_width=True)
-
         with eda2:
-            # Amount distribution by class
             preds_amt = preds.dropna(subset=['amount'])
             if len(preds_amt) > 0:
                 fig_amt = px.histogram(
@@ -261,9 +244,7 @@ if "Home" in page:
                 st.plotly_chart(fig_amt, use_container_width=True)
 
         eda3, eda4 = st.columns(2)
-
         with eda3:
-            # Fraud probability distribution
             fig_prob = px.histogram(
                 preds, x='probability', nbins=30,
                 color='prediction',
@@ -273,9 +254,7 @@ if "Home" in page:
                 barmode='overlay', opacity=0.7
             )
             st.plotly_chart(fig_prob, use_container_width=True)
-
         with eda4:
-            # Daily trend
             pm = preds.copy()
             pm['day'] = pm['timestamp'].dt.to_period('D').astype(str)
             daily = pm.groupby(['day', 'prediction']).size().reset_index(name='count')
@@ -290,23 +269,18 @@ if "Home" in page:
 
     st.markdown("---")
 
-    # Live Model Evaluation - ROC and Precision-Recall from DB
     st.subheader("Model Evaluation")
     st.caption("Computed from current predictions in the database.")
 
     if total < 10 or frauds == 0:
-        st.info("Not enough labeled predictions yet to render evaluation charts. Make predictions first.")
+        st.info("Not enough predictions yet to render evaluation charts. Make predictions first.")
     else:
         try:
             from sklearn.metrics import roc_curve, precision_recall_curve, roc_auc_score, average_precision_score
-
             y_true  = preds['prediction'].values
             y_score = preds['probability'].values
-
             ev1, ev2, ev3 = st.columns(3)
-
             with ev1:
-                # Confusion matrix from 0.5 threshold
                 y_pred = (y_score >= 0.5).astype(int)
                 tp = int(((y_pred == 1) & (y_true == 1)).sum())
                 fp = int(((y_pred == 1) & (y_true == 0)).sum())
@@ -317,58 +291,152 @@ if "Home" in page:
                     index=['Actual Legit', 'Actual Fraud'],
                     columns=['Predicted Legit', 'Predicted Fraud']
                 )
-                fig_cm = px.imshow(
-                    cm_df, text_auto=True, color_continuous_scale='Blues',
-                    title="Confusion Matrix (threshold 0.5)"
-                )
+                fig_cm = px.imshow(cm_df, text_auto=True, color_continuous_scale='Blues',
+                                   title="Confusion Matrix (threshold 0.5)")
                 st.plotly_chart(fig_cm, use_container_width=True)
-
             with ev2:
-                # ROC Curve
                 fpr, tpr, _ = roc_curve(y_true, y_score)
                 auc_val = roc_auc_score(y_true, y_score)
-                fig_roc = px.line(
-                    x=fpr, y=tpr,
-                    title=f"ROC Curve (AUC = {auc_val:.4f})",
-                    labels={'x': 'False Positive Rate', 'y': 'True Positive Rate'}
-                )
+                fig_roc = px.line(x=fpr, y=tpr,
+                                  title=f"ROC Curve (AUC = {auc_val:.4f})",
+                                  labels={'x': 'False Positive Rate', 'y': 'True Positive Rate'})
                 fig_roc.add_shape(type='line', x0=0, y0=0, x1=1, y1=1,
-                                   line=dict(dash='dash', color='gray'))
+                                  line=dict(dash='dash', color='gray'))
                 fig_roc.update_traces(line_color='#e74c3c', line_width=2)
                 st.plotly_chart(fig_roc, use_container_width=True)
-
             with ev3:
-                # Precision-Recall Curve
                 prec, rec, _ = precision_recall_curve(y_true, y_score)
                 ap = average_precision_score(y_true, y_score)
-                fig_pr = px.line(
-                    x=rec, y=prec,
-                    title=f"Precision-Recall (AP = {ap:.4f})",
-                    labels={'x': 'Recall', 'y': 'Precision'}
-                )
+                fig_pr = px.line(x=rec, y=prec,
+                                 title=f"Precision-Recall (AP = {ap:.4f})",
+                                 labels={'x': 'Recall', 'y': 'Precision'})
                 fig_pr.update_traces(line_color='#3498db', line_width=2)
                 st.plotly_chart(fig_pr, use_container_width=True)
-
         except Exception as e:
             st.warning(f"Could not render evaluation charts: {e}")
 
     st.markdown("---")
 
-    # About the developer - always at the bottom
+    # Chatbot assistant
+    st.subheader("App Assistant")
+    st.caption("Ask anything in any language - English, French, Arabic, Spanish and more.")
+
+    SYSTEM_PROMPT = (
+        "You are a multilingual assistant for an AI-Powered Financial Fraud Detection System "
+        "built by Issa TOURE, a data analyst at KIIT University, India.\n\n"
+        "LANGUAGE RULE: Always respond in the same language the user writes in. "
+        "French input gets French response. Arabic gets Arabic. Never switch unless the user does.\n\n"
+        "APP PAGES:\n"
+        "- Home: live KPIs, system description, tech stack, model comparison, EDA charts, evaluation charts, chatbot, about developer.\n"
+        "- Fraud Detection: choose Risk Profile (Low/Medium/High), enter transaction manually or upload CSV.\n"
+        "- Dashboard: live Plotly charts - distribution, daily trends, amount vs probability.\n"
+        "- History: editable table, mark records as Pending / Confirmed Fraud / False Positive. Export CSV.\n"
+        "- Retraining: upload any CSV, auto-detects fraud column, retrains Random Forest, updates metrics.\n\n"
+        "MODEL: Random Forest, 284,807 transactions, F1=68.78%, AUC=97.95%, Recall=80%, Precision=60.32%.\n"
+        "RISK PROFILES: Low(0.3)=more alerts, Medium(0.5)=balanced, High(0.7)=fewer alerts.\n"
+        "RESET BUTTON: in sidebar, restores original model and 300 seeded predictions.\n"
+        "Answer clearly and help users understand the app and fraud predictions."
+    )
+
+    if "chat_history" not in st.session_state:
+        st.session_state.chat_history = []
+    if "voice_transcript" not in st.session_state:
+        st.session_state.voice_transcript = ""
+
+    import streamlit.components.v1 as components
+
+    voice_html = (
+        '<div style="margin-bottom:8px;">'
+        '<button id="micBtn" onclick="startVoice()" style="'
+        'background:#e74c3c;color:white;border:none;border-radius:8px;'
+        'padding:8px 18px;font-size:14px;cursor:pointer;font-weight:500;">'
+        '&#127908; Speak</button>'
+        '<span id="statusTxt" style="margin-left:12px;font-size:13px;color:#888;">'
+        'Click to speak in any language</span></div>'
+        '<script>'
+        'function startVoice(){'
+        'var btn=document.getElementById("micBtn");'
+        'var st=document.getElementById("statusTxt");'
+        'if(!("webkitSpeechRecognition" in window)&&!("SpeechRecognition" in window)){'
+        'st.textContent="Voice not supported. Use Chrome or Edge.";'
+        'st.style.color="#e74c3c";return;}'
+        'var SR=window.SpeechRecognition||window.webkitSpeechRecognition;'
+        'var rec=new SR();rec.continuous=false;rec.interimResults=false;rec.lang="";'
+        'btn.textContent="Listening...";btn.style.background="#c0392b";'
+        'st.textContent="Speak now...";st.style.color="#e74c3c";'
+        'rec.start();'
+        'rec.onresult=function(e){'
+        'var t=e.results[0][0].transcript;'
+        'btn.textContent="&#127908; Speak";btn.style.background="#e74c3c";'
+        'st.textContent="Heard: "+t;st.style.color="#2ecc71";'
+        'window.parent.postMessage({type:"streamlit:setComponentValue",value:t},"*");};'
+        'rec.onerror=function(e){'
+        'btn.textContent="&#127908; Speak";btn.style.background="#e74c3c";'
+        'st.textContent="Error: "+e.error;st.style.color="#e74c3c";};'
+        'rec.onend=function(){'
+        'if(btn.textContent==="Listening..."){'
+        'btn.textContent="&#127908; Speak";btn.style.background="#e74c3c";}};}'
+        '</script>'
+    )
+
+    voice_result = components.html(voice_html, height=55)
+    if voice_result and isinstance(voice_result, str) and voice_result.strip():
+        st.session_state.voice_transcript = voice_result.strip()
+
+    if st.session_state.voice_transcript:
+        st.info(f"Voice input: {st.session_state.voice_transcript}")
+
+    for msg in st.session_state.chat_history:
+        with st.chat_message(msg["role"]):
+            st.markdown(msg["content"])
+
+    user_input  = st.chat_input("Ask me anything in any language...")
+    final_input = user_input or (st.session_state.voice_transcript if st.session_state.voice_transcript else None)
+
+    if final_input:
+        st.session_state.voice_transcript = ""
+        st.session_state.chat_history.append({"role": "user", "content": final_input})
+        with st.chat_message("user"):
+            st.markdown(final_input)
+        with st.chat_message("assistant"):
+            with st.spinner("Thinking..."):
+                try:
+                    import anthropic
+                    client = anthropic.Anthropic(api_key=st.secrets["ANTHROPIC_API_KEY"])
+                    messages = [{"role": m["role"], "content": m["content"]}
+                                for m in st.session_state.chat_history]
+                    response = client.messages.create(
+                        model="claude-haiku-4-5-20251001",
+                        max_tokens=512,
+                        system=SYSTEM_PROMPT,
+                        messages=messages
+                    )
+                    reply = response.content[0].text
+                except Exception as e:
+                    reply = f"Assistant unavailable: {e}. Please add ANTHROPIC_API_KEY in Streamlit secrets."
+            st.markdown(reply)
+            st.session_state.chat_history.append({"role": "assistant", "content": reply})
+
+    if st.session_state.chat_history:
+        if st.button("Clear Chat", use_container_width=False):
+            st.session_state.chat_history = []
+            st.rerun()
+
+    st.markdown("---")
+
+    # About the developer - very bottom
     st.subheader("About the Developer")
-    st.markdown("""
-**Issa TOURE** is a data analyst and full-stack developer currently pursuing a Master of Science
-in Computer Science at KIIT University, Bhubaneswar, India. This project was built as part of a
-summer internship program to demonstrate end-to-end machine learning deployment in a real-world
-financial fraud context.
-
-The system covers the full data science lifecycle: raw data ingestion, exploratory analysis,
-feature engineering, model training with class imbalance handling, evaluation, deployment,
-and live monitoring. The application was built entirely in Python using open-source tools
-and is hosted publicly on Streamlit Community Cloud.
-
-**Areas of expertise:** Data Analytics, Python, Machine Learning, Web Development, SQL.
-    """)
+    st.markdown(
+        "**Issa TOURE** is a data analyst and full-stack developer currently pursuing a Master of Science "
+        "in Computer Science at KIIT University, Bhubaneswar, India. This project was built as part of a "
+        "summer internship program to demonstrate end-to-end machine learning deployment in a real-world "
+        "financial fraud context.\n\n"
+        "The system covers the full data science lifecycle: raw data ingestion, exploratory analysis, "
+        "feature engineering, model training with class imbalance handling, evaluation, deployment, "
+        "and live monitoring. The application was built entirely in Python using open-source tools "
+        "and is hosted publicly on Streamlit Community Cloud.\n\n"
+        "**Areas of expertise:** Data Analytics, Python, Machine Learning, Web Development, SQL."
+    )
 
 # PAGE: FRAUD DETECTION
 elif "Detection" in page:
@@ -388,9 +456,9 @@ elif "Detection" in page:
     threshold = rp["threshold"]
 
     rc1, rc2, rc3 = st.columns(3)
-    rc1.metric("Risk Profile",        risk_choice.split("  ")[1])
-    rc2.metric("Decision Threshold",  f"{threshold:.0%}")
-    rc3.metric("Mode",                rp["desc"].split(".")[0])
+    rc1.metric("Risk Profile",       risk_choice.split("  ")[1])
+    rc2.metric("Decision Threshold", f"{threshold:.0%}")
+    rc3.metric("Mode",               rp["desc"].split(".")[0])
     st.markdown(f"> {rp['desc']}")
     st.markdown("---")
 
@@ -427,12 +495,10 @@ elif "Detection" in page:
                 if f == 'scaled_amount': input_data[f] = sc_amount
                 elif f == 'scaled_time': input_data[f] = sc_time
                 else:                    input_data[f] = v_vals.get(f, 0.0)
-            # Pass as numpy array to bypass sklearn feature name validation
             input_arr = np.array([[input_data[f] for f in feature_names]])
             proba     = model.predict_proba(input_arr)[0][1]
-            pred     = 1 if proba >= threshold else 0
+            pred      = 1 if proba >= threshold else 0
 
-            # Risk badge
             if proba < 0.3:
                 risk_label = "🟢 LOW RISK"
                 risk_color = "#2ecc71"
@@ -448,9 +514,9 @@ elif "Detection" in page:
 
             st.markdown("---")
             col_r1, col_r2, col_r3 = st.columns(3)
-            col_r1.metric("Verdict",          "FRAUD" if pred == 1 else "LEGITIMATE")
+            col_r1.metric("Verdict",           "FRAUD" if pred == 1 else "LEGITIMATE")
             col_r2.metric("Fraud Probability", f"{proba*100:.2f}%")
-            col_r3.metric("Risk Level",        risk_label.split(" ",1)[1])
+            col_r3.metric("Risk Level",        risk_label.split(" ", 1)[1])
 
             if pred == 1:
                 st.error(f"### FRAUD DETECTED - {risk_label}")
@@ -478,31 +544,26 @@ elif "Detection" in page:
 
     with tab2:
         st.markdown("#### Step 2: Upload any CSV file")
-        st.info(f"Using **{risk_choice.split('  ')[1]}** profile — threshold {threshold:.0%}. Missing columns filled automatically.")
+        st.info(f"Using **{risk_choice.split('  ')[1]}** profile - threshold {threshold:.0%}. Missing columns filled automatically.")
         uploaded = st.file_uploader("Upload CSV file", type=['csv'])
         if uploaded:
             df_up = pd.read_csv(uploaded)
             st.write(f"Uploaded: {df_up.shape[0]:,} rows x {df_up.shape[1]} columns")
             st.write(f"Columns found: {', '.join(df_up.columns.tolist())}")
 
-            # Build numpy array matching exact training feature order
-            X_arr = np.zeros((len(df_up), len(feature_names)), dtype=np.float64)
+            X_arr    = np.zeros((len(df_up), len(feature_names)), dtype=np.float64)
             feat_idx = {f: i for i, f in enumerate(feature_names)}
             if 'Amount' in df_up.columns:
-                scaled_amt = scaler['amount'].transform(df_up[['Amount']]).flatten()
-                X_arr[:, feat_idx['scaled_amount']] = scaled_amt
+                X_arr[:, feat_idx['scaled_amount']] = scaler['amount'].transform(df_up[['Amount']]).flatten()
             if 'Time' in df_up.columns:
-                scaled_time = scaler['time'].transform(df_up[['Time']]).flatten()
-                X_arr[:, feat_idx['scaled_time']] = scaled_time
+                X_arr[:, feat_idx['scaled_time']] = scaler['time'].transform(df_up[['Time']]).flatten()
             for col in df_up.columns:
                 if col in feat_idx:
                     X_arr[:, feat_idx[col]] = df_up[col].fillna(0).values
 
-            # Pass as numpy array - skips sklearn feature name validation
             probas = model.predict_proba(X_arr)[:, 1]
             preds  = (probas >= threshold).astype(int)
 
-            # Risk labels
             def risk_label(p):
                 if p < 0.3:   return "🟢 Low Risk"
                 elif p < 0.6: return "🟡 Medium Risk"
@@ -526,7 +587,6 @@ elif "Detection" in page:
             else:
                 st.warning(f"{fraud_count} suspicious transactions flagged at **{risk_choice.split('  ')[1]}** threshold.")
 
-            # Save to database
             amt_col = df_up['Amount'].values if 'Amount' in df_up.columns else [0.0] * len(preds)
             conn = sqlite3.connect(DB_PATH)
             c    = conn.cursor()
@@ -550,17 +610,17 @@ elif "Dashboard" in page:
     if preds.empty:
         st.warning("No prediction data yet.")
     else:
-        total  = len(preds)
-        frauds = preds['prediction'].sum()
-        legits = total - frauds
+        total     = len(preds)
+        frauds    = preds['prediction'].sum()
+        legits    = total - frauds
         avg_prob  = preds['probability'].mean() * 100
         fraud_pct = frauds / total * 100
 
         c1, c2, c3, c4 = st.columns(4)
         c1.metric("Total Predictions", f"{total:,}")
-        c2.metric("Fraud",  f"{frauds:,}",  f"{fraud_pct:.1f}%",       delta_color="inverse")
+        c2.metric("Fraud",  f"{frauds:,}",  f"{fraud_pct:.1f}%", delta_color="inverse")
         c3.metric("Legit",  f"{legits:,}",  f"{100-fraud_pct:.1f}%")
-        c4.metric("Avg Fraud Prob",         f"{avg_prob:.1f}%")
+        c4.metric("Avg Fraud Prob",          f"{avg_prob:.1f}%")
 
         st.markdown("---")
         r1l, r1r = st.columns(2)
@@ -615,7 +675,6 @@ elif "History" in page:
     if preds.empty:
         st.warning("No prediction records found.")
     else:
-        # Status summary
         s1, s2, s3 = st.columns(3)
         s1.metric("Pending Review",  (preds['analyst_status'] == 'Pending').sum())
         s2.metric("Confirmed Fraud", (preds['analyst_status'] == 'Confirmed Fraud').sum())
@@ -708,7 +767,7 @@ Any CSV file uploaded
        ↓
 Auto-detect fraud column
        ↓
-Feature Engineering + SMOTE
+Feature Engineering + Oversampling
        ↓
 Train Random Forest
        ↓
@@ -728,12 +787,9 @@ Metrics updated live
     if new_data:
         df_new = pd.read_csv(new_data)
         st.write(f"Uploaded: {df_new.shape[0]:,} rows x {df_new.shape[1]} columns")
-
-        # Show all columns found
         st.markdown("**Columns found in your file:**")
         st.write(df_new.columns.tolist())
 
-        # Auto-detect fraud column
         fraud_col = detect_fraud_column(df_new)
 
         if fraud_col:
@@ -742,13 +798,13 @@ Metrics updated live
             fraud_cnt = int(df_new['Class'].sum())
             legit_cnt = len(df_new) - fraud_cnt
 
-            st.success(f"Fraud column detected: **'{fraud_col}'** → mapped to Class automatically.")
+            st.success(f"Fraud column detected: **'{fraud_col}'** mapped to Class automatically.")
 
             c1, c2, c3, c4 = st.columns(4)
-            c1.metric("Total Rows",     f"{len(df_new):,}")
-            c2.metric("Fraud Samples",  f"{fraud_cnt:,}")
-            c3.metric("Legit Samples",  f"{legit_cnt:,}")
-            c4.metric("Fraud Rate",     f"{fraud_cnt/len(df_new)*100:.3f}%")
+            c1.metric("Total Rows",    f"{len(df_new):,}")
+            c2.metric("Fraud Samples", f"{fraud_cnt:,}")
+            c3.metric("Legit Samples", f"{legit_cnt:,}")
+            c4.metric("Fraud Rate",    f"{fraud_cnt/len(df_new)*100:.3f}%")
 
             if fraud_cnt < 10:
                 st.warning("Very few fraud samples found. Retraining may not improve the model.")
@@ -763,7 +819,6 @@ Metrics updated live
                         from sklearn.pipeline import Pipeline
                         from sklearn.compose import ColumnTransformer
 
-                        # Backup original model if not already backed up
                         orig_path = os.path.join(MODEL_DIR, 'fraud_model_original.pkl')
                         if not os.path.exists(orig_path):
                             shutil.copy(os.path.join(MODEL_DIR, 'fraud_model.pkl'), orig_path)
@@ -772,7 +827,6 @@ Metrics updated live
                             shutil.copy(os.path.join(MODEL_DIR, 'best_model_name.txt'),
                                         os.path.join(MODEL_DIR, 'best_model_name_original.txt'))
 
-                        # Select numeric features only
                         num_cols = df_new.select_dtypes(include=[np.number]).columns.tolist()
                         num_cols = [c for c in num_cols if c != 'Class']
                         if len(num_cols) == 0:
@@ -785,7 +839,6 @@ Metrics updated live
                         X_train, X_test, y_train, y_test = train_test_split(
                             X, y, test_size=0.2, random_state=42, stratify=y)
 
-                        # Manual oversampling (no external dependency)
                         if y_train.sum() >= 5:
                             minority   = X_train[y_train == 1]
                             min_labels = y_train[y_train == 1]
@@ -793,8 +846,6 @@ Metrics updated live
                             X_train = pd.concat([X_train] + [minority] * repeats, ignore_index=True)
                             y_train = pd.concat([y_train] + [min_labels] * repeats, ignore_index=True)
 
-                        # Build Pipeline: scaler + classifier in one object
-                        # This means the saved model handles its own preprocessing
                         scale_cols = [c for c in X_train.columns if c.lower() in ['amount', 'time']]
                         if scale_cols:
                             transformer = ColumnTransformer(
@@ -814,8 +865,6 @@ Metrics updated live
                             ])
 
                         new_pipeline.fit(X_train, y_train)
-
-                        # Evaluate
                         yp    = new_pipeline.predict(X_test)
                         yprob = new_pipeline.predict_proba(X_test)[:, 1]
                         new_metrics = {
@@ -827,7 +876,6 @@ Metrics updated live
                             'ROC_AUC':   round(roc_auc_score(y_test, yprob) * 100, 2),
                         }
 
-                        # Save pipeline and metadata
                         joblib.dump(new_pipeline, os.path.join(MODEL_DIR, 'fraud_model.pkl'))
                         joblib.dump(X.columns.tolist(), os.path.join(MODEL_DIR, 'feature_names.pkl'))
                         pd.DataFrame([new_metrics]).to_csv(os.path.join(MODEL_DIR, 'model_metrics.csv'), index=False)
@@ -856,10 +904,11 @@ Metrics updated live
         else:
             st.warning("No fraud/label column detected automatically in this file.")
             st.markdown("**Your file has these columns:**")
-            col_df = pd.DataFrame({'Column Name': df_new.columns.tolist(),
-                                   'Data Type':   [str(df_new[c].dtype) for c in df_new.columns],
-                                   'Sample Value':[str(df_new[c].iloc[0]) if len(df_new) > 0 else 'N/A'
-                                                   for c in df_new.columns]})
+            col_df = pd.DataFrame({
+                'Column Name':  df_new.columns.tolist(),
+                'Data Type':    [str(df_new[c].dtype) for c in df_new.columns],
+                'Sample Value': [str(df_new[c].iloc[0]) if len(df_new) > 0 else 'N/A' for c in df_new.columns]
+            })
             st.dataframe(col_df, use_container_width=True)
             st.info("For retraining, your CSV needs a column with values 0 (Legit) and 1 (Fraud). "
                     "Common names: Class, is_fraud, fraud, label, target. "
