@@ -39,7 +39,7 @@ def load_model():
         best_name = f.read().strip()
     return model, scaler, feats, metrics, best_name
 
-# ttl=0 forces fresh read every time - fixes KPI stale data
+# ttl=0 forces fresh read every time  fixes KPI stale data
 @st.cache_data(ttl=0)
 def get_db_predictions():
     conn = sqlite3.connect(DB_PATH)
@@ -316,10 +316,9 @@ if "Home" in page:
 
     st.markdown("---")
 
-    # App Assistant chatbot
-    # Voice fix: use window.location (not window.parent) + query_params to pass transcript
+    # App Assistant multilingual chatbot with st.audio_input voice
     st.subheader("App Assistant")
-    st.caption("Ask anything in any language: English, French, Arabic, Spanish and more.")
+    st.caption("Type or record your question in any language: English, French, Arabic, Spanish and more.")
 
     SYSTEM_PROMPT = (
         "You are a multilingual assistant for an AI-Powered Financial Fraud Detection System "
@@ -329,7 +328,7 @@ if "Home" in page:
         "APP PAGES:\n"
         "- Home: live KPIs, system description, tech stack, model comparison, EDA charts, evaluation charts, chatbot, about developer.\n"
         "- Fraud Detection: choose Risk Profile (Low/Medium/High), enter transaction manually or upload CSV.\n"
-        "- Dashboard: live Plotly charts - distribution, daily trends, amount vs probability.\n"
+        "- Dashboard: live Plotly charts  distribution, daily trends, amount vs probability.\n"
         "- History: editable table, mark records as Pending / Confirmed Fraud / False Positive. Export CSV.\n"
         "- Retraining: upload any CSV, auto-detects fraud column, retrains Random Forest, updates metrics.\n\n"
         "MODEL: Random Forest, 284,807 transactions, F1=68.78%, AUC=97.95%, Recall=80%, Precision=60.32%.\n"
@@ -340,80 +339,37 @@ if "Home" in page:
 
     if "chat_history" not in st.session_state:
         st.session_state.chat_history = []
-    if "voice_input" not in st.session_state:
-        st.session_state.voice_input = ""
 
-    # Read voice transcript from URL query params
-    # JS sets ?voice=transcript then page reloads, Streamlit reads it here
-    try:
-        params = st.query_params
-        if "voice" in params:
-            voice_val = params["voice"]
-            if isinstance(voice_val, list):
-                voice_val = voice_val[0]
-            if voice_val and voice_val.strip() and voice_val != st.session_state.voice_input:
-                st.session_state.voice_input = voice_val.strip()
-            st.query_params.clear()
-    except Exception:
-        pass
+    # Voice input  pure Python, no JavaScript, works on Streamlit Cloud
+    st.markdown("**Voice input:** Click the mic below, speak, then click stop.")
+    audio_bytes = st.audio_input("Record your question", key="voice_recorder")
 
-    import streamlit.components.v1 as components
+    voice_transcript = ""
+    if audio_bytes is not None:
+        try:
+            import speech_recognition as sr
+            import io
+            recognizer = sr.Recognizer()
+            audio_io = io.BytesIO(audio_bytes.read())
+            with sr.AudioFile(audio_io) as source:
+                audio_data = recognizer.record(source)
+            voice_transcript = recognizer.recognize_google(audio_data)
+            st.success(f"Voice captured: {voice_transcript}")
+        except sr.UnknownValueError:
+            st.warning("Could not understand the audio. Please speak clearly and try again.")
+        except sr.RequestError:
+            st.warning("Speech recognition service unavailable. Check your internet connection.")
+        except Exception as e:
+            st.warning(f"Voice error: {e}")
 
-    # Voice button - on recognition result, reload app URL with ?voice=transcript
-    # Uses window.location (not window.parent) to work correctly on Streamlit Cloud
-    voice_html = (
-        '<div style="margin-bottom:8px;display:flex;align-items:center;gap:12px;">'
-        '<button id="micBtn" onclick="startVoice()" style="'
-        'background:#e74c3c;color:white;border:none;border-radius:8px;'
-        'padding:8px 18px;font-size:14px;cursor:pointer;font-weight:500;">'
-        'Speak</button>'
-        '<span id="statusTxt" style="font-size:13px;color:#888;">'
-        'Click to speak in any language</span>'
-        '</div>'
-        '<script>'
-        'function startVoice(){'
-        'var btn=document.getElementById("micBtn");'
-        'var st=document.getElementById("statusTxt");'
-        'if(!("webkitSpeechRecognition" in window)&&!("SpeechRecognition" in window)){'
-        'st.textContent="Voice not supported. Use Chrome or Edge.";'
-        'st.style.color="#e74c3c";return;}'
-        'var SR=window.SpeechRecognition||window.webkitSpeechRecognition;'
-        'var rec=new SR();'
-        'rec.continuous=false;rec.interimResults=false;rec.lang="";'
-        'btn.textContent="Listening...";btn.style.background="#c0392b";'
-        'st.textContent="Speak now...";st.style.color="#e74c3c";'
-        'rec.start();'
-        'rec.onresult=function(e){'
-        'var t=encodeURIComponent(e.results[0][0].transcript);'
-        'btn.textContent="Speak";btn.style.background="#e74c3c";'
-        'st.textContent="Heard. Sending to assistant...";st.style.color="#2ecc71";'
-        'var base=window.location.href.split("?")[0];'
-        'window.location.replace(base+"?voice="+t);};'
-        'rec.onerror=function(e){'
-        'btn.textContent="Speak";btn.style.background="#e74c3c";'
-        'st.textContent="Error: "+e.error+". Try again.";st.style.color="#e74c3c";};'
-        'rec.onend=function(){'
-        'if(btn.textContent==="Listening..."){'
-        'btn.textContent="Speak";btn.style.background="#e74c3c";}};}'
-        '</script>'
-    )
-    components.html(voice_html, height=55)
-
-    if st.session_state.voice_input:
-        st.info(f"Voice captured: {st.session_state.voice_input}")
-
+    # Display chat history
     for msg in st.session_state.chat_history:
         with st.chat_message(msg["role"]):
             st.markdown(msg["content"])
 
-    user_input = st.chat_input("Ask me anything in any language...")
-
-    final_input = None
-    if st.session_state.voice_input:
-        final_input = st.session_state.voice_input
-        st.session_state.voice_input = ""
-    elif user_input:
-        final_input = user_input
+    # Accept text or voice input
+    user_input = st.chat_input("Or type your question here...")
+    final_input = voice_transcript if voice_transcript else (user_input if user_input else None)
 
     if final_input:
         st.session_state.chat_history.append({"role": "user", "content": final_input})
@@ -441,7 +397,6 @@ if "Home" in page:
     if st.session_state.chat_history:
         if st.button("Clear Chat", use_container_width=False):
             st.session_state.chat_history = []
-            st.session_state.voice_input  = ""
             st.rerun()
 
     st.markdown("---")
@@ -564,7 +519,7 @@ elif "Fraud Detection" in page:
 
     with tab2:
         st.markdown("#### Step 2: Upload any CSV file")
-        st.info(f"Using **{risk_choice}** profile - threshold {threshold:.0%}. Missing columns filled automatically.")
+        st.info(f"Using **{risk_choice}** profile  threshold {threshold:.0%}. Missing columns filled automatically.")
         uploaded = st.file_uploader("Upload CSV file", type=['csv'])
         if uploaded:
             df_up = pd.read_csv(uploaded)
@@ -801,7 +756,7 @@ Metrics updated live
 
     st.markdown("---")
     st.subheader("Upload New Training Data")
-    st.info("Upload any CSV file. The system auto-detects the fraud column. No exact column name required.")
+    st.info("Upload any CSV file. The system auto detects the fraud column. No exact column name required.")
     new_data = st.file_uploader("Upload CSV file", type=['csv'])
 
     if new_data:
