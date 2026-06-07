@@ -9,4 +9,4 @@ streamlit
 joblib
 imbalanced-learn
 anthropic
-
+SpeechRecognition
